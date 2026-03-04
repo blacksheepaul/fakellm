@@ -128,35 +128,38 @@ type Config struct {
 
 ## 实现任务（分阶段提交）
 
-### Phase 1 — 脚手架
-- [ ] `go mod init`，引入 hertz 依赖
-- [ ] 提交：`chore: init go module with hertz dependency`
+### Phase 1 — 脚手架 ✅ 已提交 ec6b205
+- [x] `go mod init`，引入 hertz 依赖
+- [x] 提交：`chore: init go module with hertz dependency`
 
-### Phase 2 — 协议 + 配置
-- [ ] 实现 `pkg/openai`（协议结构体）
-- [ ] 实现 `internal/config`（Config + atomic 读写）
-- [ ] 提交：`feat: add openai protocol types and runtime config`
+### Phase 2 — 协议 + 配置 ✅ 已提交 d5bca90
+- [x] 实现 `pkg/openai`（协议结构体）
+- [x] 实现 `internal/config`（Config + atomic 读写）
+- [x] 提交：`feat: add openai protocol types and runtime config`
 
-### Phase 3 — Admission + Queue
-- [ ] 实现 `internal/admission`
-- [ ] 实现 `internal/queue`
-- [ ] 提交：`feat: implement admission semaphore and request queue`
+### Phase 3 — Admission + Queue ✅ 已提交 5b3f759
+- [x] 实现 `internal/admission`（chan-based semaphore，TryAcquire/Release/Current）
+- [x] 实现 `internal/queue`（bounded channel queue，context 取消，queue-wait timeout）
+- [x] 提交：`feat: implement admission semaphore and request queue`
 
-### Phase 4 — TokenStream
-- [ ] 实现 `internal/tokenstream`（lorem 流 + 速率/抖动/slowdown）
-- [ ] 单元测试：`internal/tokenstream`
-- [ ] 提交：`feat: implement token stream with rate/jitter/slowdown control`
+### Phase 4 — TokenStream ✅ 已提交 53edc0e
+- [x] 实现 `internal/tokenstream`（lorem 流 + 速率/抖动/slowdown）
+- [x] 单元测试 4 个全通过（EmitsDONE / ContainsLoremWords / CancelMidway / SlowdownReducesRate）
+- [x] 提交：`feat: implement token stream with rate/jitter/slowdown control`
 
-### Phase 5 — Handler + Server
-- [ ] 实现 `internal/handler`（Hertz SSE handler）
+### Phase 5 — Handler + Server 🚧 进行中（未提交）
+- [x] 实现 `internal/handler/chat.go`（Hertz SSE handler，串联三层管道，io.Pipe 接 SetBodyStream）
+- [ ] **阻塞项**：`go mod tidy` 因网络超时未完成，go.sum 不完整，handler 包暂无法编译
+  - go.mod 已手动写入 `require github.com/cloudwego/hertz v0.10.4`
+  - 恢复后执行 `go mod tidy` 即可解除阻塞
 - [ ] 实现 `cmd/server/main.go`
 - [ ] 提交：`feat: wire up hertz server and SSE chat completions handler`
 
-### Phase 6 — Admin API
-- [ ] 实现 `internal/admin`
+### Phase 6 — Admin API ⬜ 待开始
+- [ ] 实现 `internal/admin`（GET/PATCH /admin/config，GET /admin/stats）
 - [ ] 提交：`feat: add admin API for runtime config and stats`
 
-### Phase 7 — 测试
+### Phase 7 — 测试 ⬜ 待开始
 - [ ] 单元测试：admission、queue
 - [ ] 冒烟测试：curl 验证 SSE 流、429、503
 - [ ] 提交：`test: add unit tests and smoke test instructions`
