@@ -1,0 +1,198 @@
+// Package tokenstream generates a fake token stream from a lorem ipsum corpus
+// and emits each token as an OpenAI-compatible SSE frame.
+//
+// Rate control pipeline per request:
+//
+//	base_interval = 1s / TokensPerSecond
+//	effective_interval = base_interval / SlowdownFactor   (when QPS > threshold)
+//	per_token_sleep = effective_interval + FixedDelayMs + rand(-JitterMs, +JitterMs)
+package tokenstream
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"math/rand/v2"
+	"strings"
+	"sync/atomic"
+	"time"
+
+	"mockllm/internal/config"
+	"mockllm/pkg/openai"
+
+	"encoding/json"
+)
+
+// lorem is the token corpus. Words are emitted round-robin.
+var loremWords = strings.Fields(`Lorem ipsum dolor sit amet consectetur adipiscing elit sed do
+eiusmod tempor incididunt ut labore et dolore magna aliqua Ut enim ad minim veniam
+quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat
+Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu
+fugiat nulla pariatur Excepteur sint occaecat cupidatat non proident sunt in culpa
+qui officia deserunt mollit anim id est laborum Sed ut perspiciatis unde omnis iste
+natus error sit voluptatem accusantium doloremque laudantium totam rem aperiam eaque
+ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt
+explicabo Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit
+sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt neque
+porro quisquam est qui dolorem ipsum quia dolor sit amet consectetur adipisci velit`)
+
+// Streamer manages QPS tracking and token emission.
+type Streamer struct {
+	cfg *config.Manager
+
+	// 1-second sliding window QPS counter.
+	windowStart atomic.Int64 // UnixNano of window start
+	windowCount atomic.Int64 // requests in current window
+	qps         atomic.Int64 // last measured QPS (integer approximation)
+}
+
+// New creates a Streamer backed by the given config manager.
+func New(cfg *config.Manager) *Streamer {
+	s := &Streamer{cfg: cfg}
+	s.windowStart.Store(time.Now().UnixNano())
+	return s
+}
+
+// RecordRequest increments the QPS counter.
+// Should be called once at the start of each streaming request.
+func (s *Streamer) RecordRequest() {
+	now := time.Now().UnixNano()
+	windowNs := int64(time.Second)
+	ws := s.windowStart.Load()
+
+	if now-ws >= windowNs {
+		// Rotate window: snapshot count as QPS, reset.
+		count := s.windowCount.Swap(0)
+		s.qps.Store(count)
+		s.windowStart.Store(now)
+	}
+	s.windowCount.Add(1)
+}
+
+// CurrentQPS returns the measured QPS from the last completed window.
+func (s *Streamer) CurrentQPS() float64 {
+	return float64(s.qps.Load())
+}
+
+// Stream writes the lorem token stream as SSE to w.
+// It respects ctx cancellation (client disconnect).
+// model is echoed back in each chunk.
+func (s *Streamer) Stream(ctx context.Context, w io.Writer, model string) error {
+	cfg := s.cfg.Load()
+
+	// Compute effective tokens-per-second.
+	tps := cfg.TokensPerSecond
+	if tps <= 0 {
+		tps = 20
+	}
+	if cfg.SlowdownQPSThreshold > 0 && s.CurrentQPS() >= cfg.SlowdownQPSThreshold {
+		factor := cfg.SlowdownFactor
+		if factor > 0 {
+			tps *= factor
+		}
+	}
+	baseInterval := time.Duration(float64(time.Second) / tps)
+
+	reqID := fmt.Sprintf("chatcmpl-mock-%d", time.Now().UnixNano())
+	created := time.Now().Unix()
+
+	// Send role delta in the first chunk.
+	if err := writeChunk(w, openai.StreamChunk{
+		ID:      reqID,
+		Object:  "chat.completion.chunk",
+		Created: created,
+		Model:   model,
+		Choices: []openai.StreamChoice{
+			{Index: 0, Delta: openai.Delta{Role: "assistant"}, FinishReason: nil},
+		},
+	}); err != nil {
+		return err
+	}
+	flush(w)
+
+	// Emit tokens round-robin from the corpus.
+	for i, word := range loremWords {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		sleep := baseInterval +
+			time.Duration(cfg.FixedDelayMs)*time.Millisecond +
+			jitter(cfg.JitterMs)
+
+		timer := time.NewTimer(sleep)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+
+		content := word
+		if i < len(loremWords)-1 {
+			content += " "
+		}
+
+		if err := writeChunk(w, openai.StreamChunk{
+			ID:      reqID,
+			Object:  "chat.completion.chunk",
+			Created: created,
+			Model:   model,
+			Choices: []openai.StreamChoice{
+				{Index: 0, Delta: openai.Delta{Content: content}, FinishReason: nil},
+			},
+		}); err != nil {
+			return err
+		}
+		flush(w)
+	}
+
+	// Send finish chunk.
+	stopReason := "stop"
+	if err := writeChunk(w, openai.StreamChunk{
+		ID:      reqID,
+		Object:  "chat.completion.chunk",
+		Created: created,
+		Model:   model,
+		Choices: []openai.StreamChoice{
+			{Index: 0, Delta: openai.Delta{}, FinishReason: &stopReason},
+		},
+	}); err != nil {
+		return err
+	}
+	flush(w)
+
+	// SSE stream terminator.
+	_, err := fmt.Fprintf(w, "data: [DONE]\n\n")
+	flush(w)
+	return err
+}
+
+// writeChunk serialises chunk as a single SSE data line.
+func writeChunk(w io.Writer, chunk openai.StreamChunk) error {
+	b, err := json.Marshal(chunk)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(w, "data: %s\n\n", b)
+	return err
+}
+
+// flush calls Flush on w if it implements http.Flusher or hertz's equivalent.
+func flush(w io.Writer) {
+	type flusher interface{ Flush() }
+	if f, ok := w.(flusher); ok {
+		f.Flush()
+	}
+}
+
+// jitter returns a random duration in [-ms, +ms].
+func jitter(ms int) time.Duration {
+	if ms <= 0 {
+		return 0
+	}
+	// rand.IntN returns [0, 2*ms), shift to [-ms, ms).
+	return time.Duration(rand.IntN(2*ms)-ms) * time.Millisecond
+}
