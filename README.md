@@ -1,4 +1,4 @@
-# mockllm
+# fakellm / mockllm / llm faker/mocker
 
 一个可编程的 OpenAI 兼容 Mock LLM，用于低成本压测网关。
 
