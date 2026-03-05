@@ -1,6 +1,6 @@
 .PHONY: build build-linux
 
-BINARY_NAME=mockllm
+BINARY_NAME=fakellm
 OUTPUT_DIR=bin
 MAIN_PACKAGE=./cmd/server
 

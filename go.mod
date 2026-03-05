@@ -1,4 +1,4 @@
-module mockllm
+module fakellm
 
 go 1.25.4
 
