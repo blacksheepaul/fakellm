@@ -17,6 +17,7 @@ import (
 	"mockllm/internal/config"
 	"mockllm/internal/queue"
 	"mockllm/internal/tokenstream"
+	pkgcfg "mockllm/pkg/config"
 
 	"github.com/cloudwego/hertz/pkg/app"
 )
@@ -34,21 +35,11 @@ func New(cfg *config.Manager, sema *admission.Semaphore, q *queue.Queue, streame
 	return &Admin{cfg: cfg, sema: sema, q: q, streamer: streamer}
 }
 
-// configJSON is the JSON representation of Config (adds QueueTimeoutSec for
-// human-friendliness since time.Duration marshals as nanoseconds by default).
-type configJSON struct {
-	MaxConcurrent        int     `json:"max_concurrent"`
-	MaxQueueDepth        int     `json:"max_queue_depth"`
-	QueueTimeoutSec      float64 `json:"queue_timeout_sec"`
-	TokensPerSecond      float64 `json:"tokens_per_second"`
-	FixedDelayMs         int     `json:"fixed_delay_ms"`
-	JitterMs             int     `json:"jitter_ms"`
-	SlowdownQPSThreshold float64 `json:"slowdown_qps_threshold"`
-	SlowdownFactor       float64 `json:"slowdown_factor"`
-}
+// AdminConfig is re-exported for internal use.
+type AdminConfig = pkgcfg.AdminConfig
 
-func toJSON(c *config.Config) configJSON {
-	return configJSON{
+func toJSON(c *config.Config) AdminConfig {
+	return AdminConfig{
 		MaxConcurrent:        c.MaxConcurrent,
 		MaxQueueDepth:        c.MaxQueueDepth,
 		QueueTimeoutSec:      c.QueueTimeout.Seconds(),
@@ -71,7 +62,7 @@ func (a *Admin) GetConfig(ctx context.Context, c *app.RequestContext) {
 // PatchConfig handles PATCH /admin/config.
 // Accepts a partial configJSON; only non-zero fields overwrite the current value.
 func (a *Admin) PatchConfig(ctx context.Context, c *app.RequestContext) {
-	var patch configJSON
+	var patch AdminConfig
 	if err := json.Unmarshal(c.Request.Body(), &patch); err != nil {
 		c.Response.SetStatusCode(http.StatusBadRequest)
 		c.Response.SetBodyString(`{"error":"invalid JSON"}`)
