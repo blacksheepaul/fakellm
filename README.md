@@ -6,8 +6,16 @@
 
 ## 快速开始
 
+launch from source
+
 ```bash
 go run ./cmd/server -addr :8080
+```
+
+or, launch from release
+
+```bash
+fakellm -addr :8080
 ```
 
 ```bash
