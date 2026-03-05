@@ -1,12 +1,15 @@
 .PHONY: build build-linux
 
 BINARY_NAME=mockllm
+OUTPUT_DIR=bin
 MAIN_PACKAGE=./cmd/server
 
 # 本地编译
 build:
-	go build -o $(BINARY_NAME) $(MAIN_PACKAGE)
+	mkdir -p $(OUTPUT_DIR)
+	go build -o $(OUTPUT_DIR)/$(BINARY_NAME) $(MAIN_PACKAGE)
 
 # Linux AMD64 交叉编译
 build-linux:
-	GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME)-linux-amd64 $(MAIN_PACKAGE)
+	mkdir -p $(OUTPUT_DIR)
+	GOOS=linux GOARCH=amd64 go build -o $(OUTPUT_DIR)/$(BINARY_NAME)-linux-amd64 $(MAIN_PACKAGE)
