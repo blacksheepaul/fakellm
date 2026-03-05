@@ -147,22 +147,52 @@ type Config struct {
 - [x] 单元测试 4 个全通过（EmitsDONE / ContainsLoremWords / CancelMidway / SlowdownReducesRate）
 - [x] 提交：`feat: implement token stream with rate/jitter/slowdown control`
 
-### Phase 5 — Handler + Server 🚧 进行中（未提交）
-- [x] 实现 `internal/handler/chat.go`（Hertz SSE handler，串联三层管道，io.Pipe 接 SetBodyStream）
-- [ ] **阻塞项**：`go mod tidy` 因网络超时未完成，go.sum 不完整，handler 包暂无法编译
-  - go.mod 已手动写入 `require github.com/cloudwego/hertz v0.10.4`
-  - 恢复后执行 `go mod tidy` 即可解除阻塞
-- [ ] 实现 `cmd/server/main.go`
-- [ ] 提交：`feat: wire up hertz server and SSE chat completions handler`
+### Phase 5 — Handler + Server ✅ 已提交 07ce0f2
+- [x] 实现 `internal/handler/chat.go`（Hertz SSE handler，io.Pipe 接 SetBodyStream，串联三层管道）
+- [x] 实现 `cmd/server/main.go`（flag 端口、64 worker，注册所有路由）
+- [x] 提交：`feat: wire up hertz server, SSE handler, and admin API`
 
-### Phase 6 — Admin API ⬜ 待开始
-- [ ] 实现 `internal/admin`（GET/PATCH /admin/config，GET /admin/stats）
-- [ ] 提交：`feat: add admin API for runtime config and stats`
+### Phase 6 — Admin API ✅ 已提交 07ce0f2
+- [x] 实现 `internal/admin`（GET/PATCH /admin/config，GET /admin/stats）
+- [x] configJSON 用 `queue_timeout_sec` float 替代纳秒，人类可读
+- [x] 提交：`feat: wire up hertz server, SSE handler, and admin API`
 
-### Phase 7 — 测试 ⬜ 待开始
-- [ ] 单元测试：admission、queue
-- [ ] 冒烟测试：curl 验证 SSE 流、429、503
-- [ ] 提交：`test: add unit tests and smoke test instructions`
+### Phase 7 — 测试 ✅ 已提交
+- [x] 单元测试：admission（5 个）、queue（5 个）、tokenstream（4 个），共 14 个全部通过
+- [x] 提交：`test: add unit tests for admission and queue`
+
+### 冒烟测试（手动）
+
+启动服务：
+```bash
+go run ./cmd/server -addr :8080
+```
+
+SSE 流式请求：
+```bash
+curl -N http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"mock","messages":[{"role":"user","content":"hi"}],"stream":true}'
+```
+
+触发 429（先调低并发限制再并发请求）：
+```bash
+curl -X PATCH http://localhost:8080/admin/config \
+  -H "Content-Type: application/json" \
+  -d '{"max_concurrent":1}'
+```
+
+查看实时状态：
+```bash
+curl http://localhost:8080/admin/stats
+```
+
+调慢 token 速率 + 开抖动：
+```bash
+curl -X PATCH http://localhost:8080/admin/config \
+  -H "Content-Type: application/json" \
+  -d '{"tokens_per_second":3,"jitter_ms":200,"fixed_delay_ms":100}'
+```
 
 ---
 
