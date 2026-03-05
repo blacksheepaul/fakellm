@@ -13,11 +13,11 @@ import (
 	"net/http"
 	"time"
 
-	"mockllm/internal/admission"
-	"mockllm/internal/config"
-	"mockllm/internal/queue"
-	"mockllm/internal/tokenstream"
-	pkgcfg "mockllm/pkg/config"
+	"fakellm/internal/admission"
+	"fakellm/internal/config"
+	"fakellm/internal/queue"
+	"fakellm/internal/tokenstream"
+	pkgcfg "fakellm/pkg/config"
 
 	"github.com/cloudwego/hertz/pkg/app"
 )

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"mockllm/internal/config"
+	"fakellm/internal/config"
 )
 
 func newManager(tps float64, fixedMs, jitterMs int) *config.Manager {

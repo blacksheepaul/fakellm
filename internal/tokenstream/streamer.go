@@ -17,8 +17,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"mockllm/internal/config"
-	"mockllm/pkg/openai"
+	"fakellm/internal/config"
+	"fakellm/pkg/openai"
 
 	"encoding/json"
 )

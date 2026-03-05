@@ -8,11 +8,11 @@ import (
 	"io"
 	"net/http"
 
-	"mockllm/internal/admission"
-	"mockllm/internal/config"
-	"mockllm/internal/queue"
-	"mockllm/internal/tokenstream"
-	"mockllm/pkg/openai"
+	"fakellm/internal/admission"
+	"fakellm/internal/config"
+	"fakellm/internal/queue"
+	"fakellm/internal/tokenstream"
+	"fakellm/pkg/openai"
 
 	"github.com/cloudwego/hertz/pkg/app"
 )

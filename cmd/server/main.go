@@ -4,12 +4,12 @@ import (
 	"flag"
 	"log"
 
-	"mockllm/internal/admin"
-	"mockllm/internal/admission"
-	"mockllm/internal/config"
-	"mockllm/internal/handler"
-	"mockllm/internal/queue"
-	"mockllm/internal/tokenstream"
+	"fakellm/internal/admin"
+	"fakellm/internal/admission"
+	"fakellm/internal/config"
+	"fakellm/internal/handler"
+	"fakellm/internal/queue"
+	"fakellm/internal/tokenstream"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
 )
@@ -39,6 +39,6 @@ func main() {
 	srv.PATCH("/admin/config", adm.PatchConfig)
 	srv.GET("/admin/stats", adm.GetStats)
 
-	log.Printf("mockllm listening on %s", *addr)
+	log.Printf("fakellm listening on %s", *addr)
 	srv.Spin()
 }
