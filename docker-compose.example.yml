@@ -1,0 +1,30 @@
+# FakeLLM - Docker Compose configuration for local testing and resource-constrained scenarios
+version: '3.8'
+
+services:
+  fakellm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fakellm:latest
+    container_name: fakellm
+    ports:
+      - "8080:8080"
+    environment: []
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 256M
+        reservations:
+          cpus: '0.10'
+          memory: 64M
+    # Note: Healthcheck disabled because scratch image has no shell or wget/curl
+    # Service health can be verified via: curl http://localhost:8080/admin/stats
+    restart: unless-stopped
+    networks:
+      - fakellm-net
+
+networks:
+  fakellm-net:
+    driver: bridge
