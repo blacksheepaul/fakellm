@@ -35,6 +35,31 @@ type StreamChunk struct {
 	Choices []StreamChoice `json:"choices"`
 }
 
+// Choice is one element of the choices array in a non-streaming response.
+type Choice struct {
+	Index        int         `json:"index"`
+	Message      ChatMessage `json:"message"`
+	FinishReason string      `json:"finish_reason"`
+}
+
+// Usage reports token counts in a non-streaming response.
+// PromptTokens is always 0 (mock server does not parse input).
+type Usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+// ChatResponse is the response body for a non-streaming POST /v1/chat/completions.
+type ChatResponse struct {
+	ID      string   `json:"id"`
+	Object  string   `json:"object"`
+	Created int64    `json:"created"`
+	Model   string   `json:"model"`
+	Choices []Choice `json:"choices"`
+	Usage   Usage    `json:"usage"`
+}
+
 // ErrorDetail is the inner error object.
 type ErrorDetail struct {
 	Message string `json:"message"`

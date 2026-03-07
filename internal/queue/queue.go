@@ -64,7 +64,12 @@ func (q *Queue) Enqueue(ctx context.Context, timeout time.Duration, fn func(ctx 
 		deadline := enqueued.Add(timeout)
 		wrappedFn = func(ctx context.Context) {
 			if time.Now().After(deadline) {
-				return // timed out in queue, silently discard
+				// Preserve callback semantics so callers waiting on completion are
+				// not left hanging when queue-wait timeout expires.
+				timeoutCtx, cancel := context.WithCancelCause(ctx)
+				cancel(ErrTimeout)
+				fn(timeoutCtx)
+				return
 			}
 			fn(ctx)
 		}

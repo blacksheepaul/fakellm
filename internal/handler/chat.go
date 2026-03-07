@@ -5,6 +5,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 
@@ -39,10 +40,6 @@ func (h *Handler) ChatCompletions(ctx context.Context, c *app.RequestContext) {
 		writeError(c, http.StatusBadRequest, "invalid_request", "could not parse request body")
 		return
 	}
-	if !req.Stream {
-		writeError(c, http.StatusBadRequest, "invalid_request", "only stream=true is supported")
-		return
-	}
 	model := req.Model
 	if model == "" {
 		model = "mock-llm"
@@ -58,39 +55,78 @@ func (h *Handler) ChatCompletions(ctx context.Context, c *app.RequestContext) {
 	// 3. Enqueue with queue-wait timeout from config.
 	cfg := h.cfg.Load()
 
-	// Use a pipe: tokenstream writes to pw, hertz reads from pr.
-	pr, pw := io.Pipe()
+	if req.Stream {
+		// --- Streaming path: SSE via io.Pipe ---
+		pr, pw := io.Pipe()
 
-	// The work function runs inside the queue worker.
-	work := func(qCtx context.Context) {
-		defer pw.Close()
-		h.streamer.RecordRequest()
-		if err := h.streamer.Stream(qCtx, pw, model); err != nil {
-			// Client disconnect or timeout — pipe close propagates to reader.
-			pw.CloseWithError(err)
+		work := func(qCtx context.Context) {
+			defer pw.Close()
+			h.streamer.RecordRequest()
+			if err := h.streamer.Stream(qCtx, pw, model); err != nil {
+				pw.CloseWithError(err)
+			}
 		}
-	}
 
-	if err := h.q.Enqueue(ctx, cfg.QueueTimeout, work); err != nil {
-		pr.Close()
-		switch err {
-		case queue.ErrFull:
-			writeError(c, http.StatusServiceUnavailable, "queue_full", "request queue is full")
-		default:
-			writeError(c, http.StatusGatewayTimeout, "queue_timeout", "timed out waiting in queue")
+		if err := h.q.Enqueue(ctx, cfg.QueueTimeout, work); err != nil {
+			pr.Close()
+			writeQueueError(c, err)
+			return
 		}
-		return
+
+		c.Response.Header.Set("Content-Type", "text/event-stream")
+		c.Response.Header.Set("Cache-Control", "no-cache")
+		c.Response.Header.Set("X-Accel-Buffering", "no")
+		c.Response.Header.Set("Connection", "keep-alive")
+		c.Response.SetStatusCode(http.StatusOK)
+		c.Response.SetBodyStream(pr, -1)
+	} else {
+		// --- Non-streaming path: block until full response is generated ---
+		type result struct {
+			resp *openai.ChatResponse
+			err  error
+		}
+		ch := make(chan result, 1)
+
+		work := func(qCtx context.Context) {
+			h.streamer.RecordRequest()
+			resp, err := h.streamer.Generate(qCtx, model)
+			ch <- result{resp, err}
+		}
+
+		if err := h.q.Enqueue(ctx, cfg.QueueTimeout, work); err != nil {
+			writeQueueError(c, err)
+			return
+		}
+
+		res := <-ch
+		if res.err != nil {
+			if errors.Is(res.err, queue.ErrTimeout) {
+				writeQueueError(c, queue.ErrTimeout)
+				return
+			}
+			writeError(c, http.StatusInternalServerError, "generation_error", res.err.Error())
+			return
+		}
+
+		body, err := json.Marshal(res.resp)
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, "serialization_error", err.Error())
+			return
+		}
+		c.Response.Header.Set("Content-Type", "application/json")
+		c.Response.SetStatusCode(http.StatusOK)
+		c.Response.SetBody(body)
 	}
+}
 
-	// 4. Set SSE headers and stream the response body.
-	c.Response.Header.Set("Content-Type", "text/event-stream")
-	c.Response.Header.Set("Cache-Control", "no-cache")
-	c.Response.Header.Set("X-Accel-Buffering", "no")
-	c.Response.Header.Set("Connection", "keep-alive")
-	c.Response.SetStatusCode(http.StatusOK)
-
-	// SetBodyStream(-1) tells hertz to use chunked transfer encoding.
-	c.Response.SetBodyStream(pr, -1)
+// writeQueueError maps queue enqueue errors to HTTP responses.
+func writeQueueError(c *app.RequestContext, err error) {
+	switch err {
+	case queue.ErrFull:
+		writeError(c, http.StatusServiceUnavailable, "queue_full", "request queue is full")
+	default:
+		writeError(c, http.StatusGatewayTimeout, "queue_timeout", "timed out waiting in queue")
+	}
 }
 
 // writeError writes an OpenAI-style JSON error response.

@@ -3,6 +3,7 @@ package tokenstream
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -79,7 +80,109 @@ func TestStream_CancelMidway(t *testing.T) {
 	}
 }
 
-// TestSlowdown_ReducesRate verifies that QPS-triggered slowdown increases interval.
+// TestGenerate_ReturnsFullContent verifies that Generate returns a complete
+// ChatResponse containing all lorem words.
+func TestGenerate_ReturnsFullContent(t *testing.T) {
+	mgr := newManager(10000, 0, 0) // very fast
+	s := New(mgr)
+
+	resp, err := s.Generate(context.Background(), "mock")
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("Generate returned nil response")
+	}
+	if len(resp.Choices) == 0 {
+		t.Fatal("Generate returned no choices")
+	}
+	content := resp.Choices[0].Message.Content
+	for _, word := range []string{"Lorem", "ipsum", "dolor"} {
+		if !strings.Contains(content, word) {
+			t.Errorf("expected word %q in generated content", word)
+		}
+	}
+	if resp.Choices[0].Message.Role != "assistant" {
+		t.Errorf("expected role 'assistant', got %q", resp.Choices[0].Message.Role)
+	}
+	if resp.Choices[0].FinishReason != "stop" {
+		t.Errorf("expected finish_reason 'stop', got %q", resp.Choices[0].FinishReason)
+	}
+	if resp.Usage.CompletionTokens != len(loremWords) {
+		t.Errorf("expected %d completion tokens, got %d", len(loremWords), resp.Usage.CompletionTokens)
+	}
+}
+
+// TestGenerate_CancelMidway verifies that context cancellation interrupts Generate.
+func TestGenerate_CancelMidway(t *testing.T) {
+	mgr := newManager(5, 0, 0) // 5 tokens/s → 200ms per token
+	s := New(mgr)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Generate(ctx, "mock")
+		done <- err
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	err := <-done
+	if err == nil {
+		t.Error("expected non-nil error after cancellation")
+	}
+}
+
+func TestGenerate_PropagatesCancelCause(t *testing.T) {
+	mgr := newManager(5, 0, 0)
+	s := New(mgr)
+
+	ctx, cancel := context.WithCancelCause(context.Background())
+	want := errors.New("queue timeout")
+	cancel(want)
+
+	_, err := s.Generate(ctx, "mock")
+	if !errors.Is(err, want) {
+		t.Fatalf("expected cancel cause %v, got %v", want, err)
+	}
+}
+
+// TestGenerate_MatchesStreamTiming verifies that Generate and Stream take
+// roughly the same amount of time for the same config, confirming that the
+// same rate-control logic is applied in both paths.
+func TestGenerate_MatchesStreamTiming(t *testing.T) {
+	// Use a slow-enough rate that the timing difference is measurable but the
+	// test still finishes quickly. We cancel both after a short window.
+	mgr := newManager(50, 0, 0) // 50 tokens/s → 20ms per token
+
+	measure := func(fn func(context.Context)) time.Duration {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		start := time.Now()
+		fn(ctx)
+		return time.Since(start)
+	}
+
+	streamTime := measure(func(ctx context.Context) {
+		var buf bytes.Buffer
+		_ = New(mgr).Stream(ctx, &buf, "mock")
+	})
+
+	generateTime := measure(func(ctx context.Context) {
+		_, _ = New(mgr).Generate(ctx, "mock")
+	})
+
+	// Both should be within 100ms of each other (same rate, same cancellation).
+	diff := streamTime - generateTime
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff > 100*time.Millisecond {
+		t.Errorf("timing mismatch too large: stream=%v generate=%v diff=%v", streamTime, generateTime, diff)
+	}
+}
 func TestSlowdown_ReducesRate(t *testing.T) {
 	cfg := config.Default()
 	cfg.TokensPerSecond = 1000   // fast base rate

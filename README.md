@@ -43,6 +43,6 @@ curl -X PATCH localhost:8080/admin/config -d '{"jitter_ms":200,"fixed_delay_ms":
 
 ## 端点
 
-- `POST /v1/chat/completions` — SSE 流式响应（仅支持 `stream=true`）
+- `POST /v1/chat/completions` — 支持 `stream=true`（SSE 流式）和 `stream=false`（完整 JSON 响应）
 - `GET/PATCH /admin/config` — 查看/热更新配置
 - `GET /admin/stats` — 并发数、队列深度、QPS

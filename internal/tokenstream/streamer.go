@@ -74,10 +74,19 @@ func (s *Streamer) CurrentQPS() float64 {
 	return float64(s.qps.Load())
 }
 
-// Stream writes the lorem token stream as SSE to w.
-// It respects ctx cancellation (client disconnect).
-// model is echoed back in each chunk.
-func (s *Streamer) Stream(ctx context.Context, w io.Writer, model string) error {
+// generate is the single source of truth for rate-controlled token emission.
+// It iterates over the lorem corpus, sleeping the configured interval between
+// tokens, and calls onToken for each token content string.
+// Callers decide what to do with each token (write SSE frames, accumulate, etc.).
+// ctx cancellation is respected at every sleep boundary.
+func (s *Streamer) generate(ctx context.Context, onToken func(string) error) error {
+	ctxErr := func() error {
+		if cause := context.Cause(ctx); cause != nil {
+			return cause
+		}
+		return ctx.Err()
+	}
+
 	cfg := s.cfg.Load()
 
 	// Compute effective tokens-per-second.
@@ -93,6 +102,40 @@ func (s *Streamer) Stream(ctx context.Context, w io.Writer, model string) error 
 	}
 	baseInterval := time.Duration(float64(time.Second) / tps)
 
+	for i, word := range loremWords {
+		select {
+		case <-ctx.Done():
+			return ctxErr()
+		default:
+		}
+
+		sleep := baseInterval +
+			time.Duration(cfg.FixedDelayMs)*time.Millisecond +
+			jitter(cfg.JitterMs)
+
+		timer := time.NewTimer(sleep)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctxErr()
+		case <-timer.C:
+		}
+
+		content := word
+		if i < len(loremWords)-1 {
+			content += " "
+		}
+		if err := onToken(content); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Stream writes the lorem token stream as SSE to w.
+// It respects ctx cancellation (client disconnect).
+// model is echoed back in each chunk.
+func (s *Streamer) Stream(ctx context.Context, w io.Writer, model string) error {
 	reqID := fmt.Sprintf("chatcmpl-mock-%d", time.Now().UnixNano())
 	created := time.Now().Unix()
 
@@ -110,32 +153,8 @@ func (s *Streamer) Stream(ctx context.Context, w io.Writer, model string) error 
 	}
 	flush(w)
 
-	// Emit tokens round-robin from the corpus.
-	for i, word := range loremWords {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		sleep := baseInterval +
-			time.Duration(cfg.FixedDelayMs)*time.Millisecond +
-			jitter(cfg.JitterMs)
-
-		timer := time.NewTimer(sleep)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
-
-		content := word
-		if i < len(loremWords)-1 {
-			content += " "
-		}
-
-		if err := writeChunk(w, openai.StreamChunk{
+	if err := s.generate(ctx, func(content string) error {
+		err := writeChunk(w, openai.StreamChunk{
 			ID:      reqID,
 			Object:  "chat.completion.chunk",
 			Created: created,
@@ -143,10 +162,14 @@ func (s *Streamer) Stream(ctx context.Context, w io.Writer, model string) error 
 			Choices: []openai.StreamChoice{
 				{Index: 0, Delta: openai.Delta{Content: content}, FinishReason: nil},
 			},
-		}); err != nil {
+		})
+		if err != nil {
 			return err
 		}
 		flush(w)
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	// Send finish chunk.
@@ -168,6 +191,44 @@ func (s *Streamer) Stream(ctx context.Context, w io.Writer, model string) error 
 	_, err := fmt.Fprintf(w, "data: [DONE]\n\n")
 	flush(w)
 	return err
+}
+
+// Generate runs the full rate-controlled token generation and returns a
+// non-streaming OpenAI ChatResponse. The client blocks for the same duration
+// as a streaming request would take, faithfully simulating real LLM latency.
+func (s *Streamer) Generate(ctx context.Context, model string) (*openai.ChatResponse, error) {
+	reqID := fmt.Sprintf("chatcmpl-mock-%d", time.Now().UnixNano())
+	created := time.Now().Unix()
+
+	var sb strings.Builder
+	var tokenCount int
+
+	if err := s.generate(ctx, func(content string) error {
+		sb.WriteString(content)
+		tokenCount++
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return &openai.ChatResponse{
+		ID:      reqID,
+		Object:  "chat.completion",
+		Created: created,
+		Model:   model,
+		Choices: []openai.Choice{
+			{
+				Index:        0,
+				Message:      openai.ChatMessage{Role: "assistant", Content: strings.TrimRight(sb.String(), " ")},
+				FinishReason: "stop",
+			},
+		},
+		Usage: openai.Usage{
+			PromptTokens:     0,
+			CompletionTokens: tokenCount,
+			TotalTokens:      tokenCount,
+		},
+	}, nil
 }
 
 // writeChunk serialises chunk as a single SSE data line.

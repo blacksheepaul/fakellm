@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -67,14 +68,17 @@ func TestEnqueue_ContextCancel(t *testing.T) {
 	}
 }
 
-// TestEnqueue_QueueTimeout verifies that a job arriving after its deadline is dropped.
+// TestEnqueue_QueueTimeout verifies that timeout keeps callback semantics while
+// propagating ErrTimeout to the callback context.
 func TestEnqueue_QueueTimeout(t *testing.T) {
 	// No workers — items sit in queue and expire.
 	q := &Queue{ch: make(chan Request, 10)}
 
 	var called atomic.Bool
-	err := q.Enqueue(context.Background(), 1*time.Millisecond, func(_ context.Context) {
+	var gotErr error
+	err := q.Enqueue(context.Background(), 1*time.Millisecond, func(ctx context.Context) {
 		called.Store(true)
+		gotErr = context.Cause(ctx)
 	})
 	if err != nil {
 		t.Fatalf("enqueue should succeed: %v", err)
@@ -83,10 +87,13 @@ func TestEnqueue_QueueTimeout(t *testing.T) {
 	// Wait well past the timeout, then manually drain the queue.
 	time.Sleep(20 * time.Millisecond)
 	req := <-q.ch
-	req.Fn(req.Ctx) // execute — should be a no-op because deadline passed
+	req.Fn(req.Ctx)
 
-	if called.Load() {
-		t.Fatal("work function should not execute after queue-wait timeout")
+	if !called.Load() {
+		t.Fatal("work function should execute to unblock waiter semantics")
+	}
+	if !errors.Is(gotErr, ErrTimeout) {
+		t.Fatalf("expected cause ErrTimeout, got: %v", gotErr)
 	}
 }
 
