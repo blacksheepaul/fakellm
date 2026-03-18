@@ -24,7 +24,7 @@ func main() {
 	c := cfg.Load()
 	sema := admission.New(c.MaxConcurrent)
 	q := queue.New(c.MaxQueueDepth, 64) // 64 worker goroutines
-	streamer := tokenstream.New(cfg)
+	streamer := tokenstream.New(cfg, sema, q)
 
 	h := handler.New(cfg, sema, q, streamer)
 	adm := admin.New(cfg, sema, q, streamer)

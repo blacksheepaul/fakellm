@@ -3,21 +3,28 @@
 //
 // Rate control pipeline per request:
 //
-//	base_interval = 1s / TokensPerSecond
-//	effective_interval = base_interval / SlowdownFactor   (when QPS > threshold)
-//	per_token_sleep = effective_interval + FixedDelayMs + rand(-JitterMs, +JitterMs)
+//	base_interval = 1s / (TokensPerSecond * load_efficiency * request_variance)
+//	per_token_sleep = base_interval + FixedDelayMs + rand(-JitterMs, +JitterMs)
+//
+// Load efficiency follows a three-stage curve based on concurrency:
+// - Low load (0-30%): 75%-100% efficiency (GPU underutilization)
+// - Optimal (30-80%): 100% efficiency
+// - High load (80%+): 100%-60% efficiency (memory pressure, has floor!)
 package tokenstream
 
 import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"math/rand/v2"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"fakellm/internal/admission"
 	"fakellm/internal/config"
+	"fakellm/internal/queue"
 	"fakellm/pkg/openai"
 
 	"encoding/json"
@@ -38,7 +45,9 @@ porro quisquam est qui dolorem ipsum quia dolor sit amet consectetur adipisci ve
 
 // Streamer manages QPS tracking and token emission.
 type Streamer struct {
-	cfg *config.Manager
+	cfg  *config.Manager
+	sema *admission.Semaphore
+	q    *queue.Queue
 
 	// 1-second sliding window QPS counter.
 	windowStart atomic.Int64 // UnixNano of window start
@@ -47,8 +56,8 @@ type Streamer struct {
 }
 
 // New creates a Streamer backed by the given config manager.
-func New(cfg *config.Manager) *Streamer {
-	s := &Streamer{cfg: cfg}
+func New(cfg *config.Manager, sema *admission.Semaphore, q *queue.Queue) *Streamer {
+	s := &Streamer{cfg: cfg, sema: sema, q: q}
 	s.windowStart.Store(time.Now().UnixNano())
 	return s
 }
@@ -74,6 +83,57 @@ func (s *Streamer) CurrentQPS() float64 {
 	return float64(s.qps.Load())
 }
 
+// computeLoadEfficiency calculates TPS efficiency using a sigmoid curve.
+// The sigmoid smoothly transitions from MinEfficiency (low load) to 1.0 (optimal)
+// and back down to MinEfficiency (high load).
+//
+// Formula: MinEfficiency + (1-MinEfficiency) / (1 + exp((load-center)*steepness))
+//
+// This models real GPU behavior where:
+// - Low load: GPU underutilization (~60-75% efficiency)
+// - Optimal load: full efficiency (100%)
+// - High load: memory pressure, but has floor (~60%)
+func (s *Streamer) computeLoadEfficiency(cfg *config.Config) float64 {
+	maxConcurrent := s.cfg.Load().MaxConcurrent
+	if maxConcurrent <= 0 {
+		return 1.0
+	}
+
+	current := s.sema.Current()
+	loadFactor := float64(current) / float64(maxConcurrent)
+
+	center := cfg.LoadCurveCenter
+	if center <= 0 {
+		center = 0.6
+	}
+	steepness := cfg.LoadCurveSteepness
+	if steepness <= 0 {
+		steepness = 5.0
+	}
+	minEff := cfg.MinEfficiency
+	if minEff <= 0 {
+		minEff = 0.6
+	}
+
+	// Sigmoid: returns value in [minEff, 1.0]
+	// At loadFactor = center: efficiency = (minEff + 1.0) / 2
+	sigmoid := 1.0 / (1.0 + math.Exp((loadFactor-center)*steepness))
+	return minEff + (1.0-minEff)*sigmoid
+}
+
+// computeQueuePenalty calculates TTFT penalty based on queue depth.
+func (s *Streamer) computeQueuePenalty(cfg *config.Config) float64 {
+	if !cfg.QueuePenaltyEnabled || s.q == nil {
+		return 1.0
+	}
+	depth := s.q.Depth()
+	if depth <= 0 {
+		return 1.0
+	}
+	// Each 10 queued requests adds QueuePenaltyFactor to TTFT
+	return 1.0 + float64(depth)*cfg.QueuePenaltyFactor/10.0
+}
+
 // generate is the single source of truth for rate-controlled token emission.
 // It iterates over the lorem corpus, sleeping the configured interval between
 // tokens, and calls onToken for each token content string.
@@ -94,15 +154,13 @@ func (s *Streamer) generate(ctx context.Context, onToken func(string) error) err
 	if tps <= 0 {
 		tps = 20
 	}
-	if cfg.SlowdownQPSThreshold > 0 && s.CurrentQPS() >= cfg.SlowdownQPSThreshold {
-		factor := cfg.SlowdownFactor
-		if factor > 0 {
-			tps *= factor
-		}
-	}
 
-	// Apply per-request TPS variance to simulate real GPU cluster behavior.
-	// Different requests may experience different batch sizes and scheduling delays.
+	// Apply load-based efficiency curve based on current concurrency.
+	// This simulates GPU underutilization at low load and memory pressure at high load.
+	loadEfficiency := s.computeLoadEfficiency(cfg)
+	tps *= loadEfficiency
+
+	// Apply per-request TPS variance to simulate different batch sizes.
 	if cfg.TPSVariance > 0 {
 		// rand.Float64() returns [0.0, 1.0), map to [-variance, +variance)
 		variance := (rand.Float64()*2 - 1) * cfg.TPSVariance
@@ -111,9 +169,16 @@ func (s *Streamer) generate(ctx context.Context, onToken func(string) error) err
 
 	baseInterval := time.Duration(float64(time.Second) / tps)
 
-	// Apply first token delay before emitting the first token
-	if cfg.FirstTokenDelayMs > 0 {
-		timer := time.NewTimer(time.Duration(cfg.FirstTokenDelayMs) * time.Millisecond)
+	// Apply first token delay with optional queue penalty.
+	firstTokenDelay := cfg.FirstTokenDelayMs
+	if firstTokenDelay > 0 {
+		// Queue penalty simulates waiting time when system is overloaded.
+		// This affects TTFT (Time To First Token) more than TPS.
+		penalty := s.computeQueuePenalty(cfg)
+		firstTokenDelay = int(float64(firstTokenDelay) * penalty)
+	}
+	if firstTokenDelay > 0 {
+		timer := time.NewTimer(time.Duration(firstTokenDelay) * time.Millisecond)
 		select {
 		case <-ctx.Done():
 			timer.Stop()

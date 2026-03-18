@@ -26,16 +26,31 @@ type Config struct {
 	FixedDelayMs       int     // fixed extra delay per token (ms), applied to every token
 	JitterMs           int     // random ±jitter per token (ms)
 
-	// Slowdown: when global QPS exceeds SlowdownQPSThreshold,
-	// effective rate = TokensPerSecond * SlowdownFactor (< 1.0 means slower).
-	SlowdownQPSThreshold float64
-	SlowdownFactor       float64
-
 	// TPSVariance adds per-request variance to the base TokensPerSecond.
 	// e.g., 0.15 means each request gets TPS in [85%, 115%] of base.
 	// This simulates real GPU clusters where different requests experience
 	// different batch sizes and scheduling delays.
 	TPSVariance float64
+
+	// LoadCurveCenter is the center point of the sigmoid curve (0.0-1.0).
+	// At this load factor, efficiency is exactly 50% between MinEfficiency and 1.0.
+	// Default: 0.6 (60% of max concurrency is the "tipping point")
+	LoadCurveCenter float64
+
+	// LoadCurveSteepness controls how sharp the transition is.
+	// Higher values = sharper transition. Default: 5.0
+	LoadCurveSteepness float64
+
+	// MinEfficiency is the minimum TPS efficiency at extreme load (0.0-1.0).
+	// Real GPUs don't drop to 0%; they hit a floor. Default: 0.6 (60%)
+	MinEfficiency float64
+
+	// QueuePenaltyEnabled determines if queue depth affects TTFT.
+	QueuePenaltyEnabled bool
+
+	// QueuePenaltyFactor is the TTFT increase per 10 queued requests.
+	// e.g., 0.5 means each 10 queued requests adds 50% to FirstTokenDelayMs.
+	QueuePenaltyFactor float64
 }
 
 // Default returns a sensible out-of-the-box configuration.
@@ -48,9 +63,12 @@ func Default() *Config {
 		FirstTokenDelayMs:    0,
 		FixedDelayMs:         0,
 		JitterMs:             0,
-		SlowdownQPSThreshold: 50,
-		SlowdownFactor:       0.5,
 		TPSVariance:          0.0,
+		LoadCurveCenter:      0.6,
+		LoadCurveSteepness:   5.0,
+		MinEfficiency:        0.6,
+		QueuePenaltyEnabled:  false,
+		QueuePenaltyFactor:   0.5,
 	}
 }
 
@@ -104,9 +122,12 @@ func LoadFromEnv() *Config {
 		FirstTokenDelayMs:    mustGetIntEnv("FIRST_TOKEN_DELAY_MS"),
 		FixedDelayMs:         mustGetIntEnv("FIXED_DELAY_MS"),
 		JitterMs:             mustGetIntEnv("JITTER_MS"),
-		SlowdownQPSThreshold: mustGetFloatEnv("SLOWDOWN_QPS_THRESHOLD"),
-		SlowdownFactor:       mustGetFloatEnv("SLOWDOWN_FACTOR"),
 		TPSVariance:          mustGetFloatEnv("TPS_VARIANCE"),
+		LoadCurveCenter:      mustGetFloatEnv("LOAD_CURVE_CENTER"),
+		LoadCurveSteepness:   mustGetFloatEnv("LOAD_CURVE_STEEPNESS"),
+		MinEfficiency:        mustGetFloatEnv("MIN_EFFICIENCY"),
+		QueuePenaltyEnabled:  mustGetBoolEnv("QUEUE_PENALTY_ENABLED"),
+		QueuePenaltyFactor:   mustGetFloatEnv("QUEUE_PENALTY_FACTOR"),
 	}
 }
 
@@ -144,4 +165,16 @@ func mustGetDurationEnv(key string) time.Duration {
 		panic(fmt.Sprintf("config: invalid value for %s: %q, expected duration (e.g., 30s, 1m)", key, value))
 	}
 	return d
+}
+
+func mustGetBoolEnv(key string) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		panic(fmt.Sprintf("config: required environment variable %s is not set", key))
+	}
+	b, err := strconv.ParseBool(value)
+	if err != nil {
+		panic(fmt.Sprintf("config: invalid value for %s: %q, expected boolean (true/false/1/0)", key, value))
+	}
+	return b
 }

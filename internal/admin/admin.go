@@ -47,9 +47,12 @@ func toJSON(c *config.Config) AdminConfig {
 		FirstTokenDelayMs:    c.FirstTokenDelayMs,
 		FixedDelayMs:         c.FixedDelayMs,
 		JitterMs:             c.JitterMs,
-		SlowdownQPSThreshold: c.SlowdownQPSThreshold,
-		SlowdownFactor:       c.SlowdownFactor,
 		TPSVariance:          c.TPSVariance,
+		LoadCurveCenter:      c.LoadCurveCenter,
+		LoadCurveSteepness:   c.LoadCurveSteepness,
+		MinEfficiency:        c.MinEfficiency,
+		QueuePenaltyEnabled:  c.QueuePenaltyEnabled,
+		QueuePenaltyFactor:   c.QueuePenaltyFactor,
 	}
 }
 
@@ -64,6 +67,15 @@ func (a *Admin) GetConfig(ctx context.Context, c *app.RequestContext) {
 // PatchConfig handles PATCH /admin/config.
 // Accepts a partial configJSON; only non-zero fields overwrite the current value.
 func (a *Admin) PatchConfig(ctx context.Context, c *app.RequestContext) {
+	// Parse into a map first to detect which fields were explicitly provided
+	var rawPatch map[string]json.RawMessage
+	if err := json.Unmarshal(c.Request.Body(), &rawPatch); err != nil {
+		c.Response.SetStatusCode(http.StatusBadRequest)
+		c.Response.SetBodyString(`{"error":"invalid JSON"}`)
+		return
+	}
+
+	// Parse into typed struct
 	var patch AdminConfig
 	if err := json.Unmarshal(c.Request.Body(), &patch); err != nil {
 		c.Response.SetStatusCode(http.StatusBadRequest)
@@ -93,14 +105,24 @@ func (a *Admin) PatchConfig(ctx context.Context, c *app.RequestContext) {
 		if patch.JitterMs != 0 {
 			cfg.JitterMs = patch.JitterMs
 		}
-		if patch.SlowdownQPSThreshold != 0 {
-			cfg.SlowdownQPSThreshold = patch.SlowdownQPSThreshold
-		}
-		if patch.SlowdownFactor != 0 {
-			cfg.SlowdownFactor = patch.SlowdownFactor
-		}
 		if patch.TPSVariance != 0 {
 			cfg.TPSVariance = patch.TPSVariance
+		}
+		if patch.LoadCurveCenter != 0 {
+			cfg.LoadCurveCenter = patch.LoadCurveCenter
+		}
+		if patch.LoadCurveSteepness != 0 {
+			cfg.LoadCurveSteepness = patch.LoadCurveSteepness
+		}
+		if patch.MinEfficiency != 0 {
+			cfg.MinEfficiency = patch.MinEfficiency
+		}
+		if patch.QueuePenaltyFactor != 0 {
+			cfg.QueuePenaltyFactor = patch.QueuePenaltyFactor
+		}
+		// bool: check if explicitly provided in raw JSON
+		if _, ok := rawPatch["queue_penalty_enabled"]; ok {
+			cfg.QueuePenaltyEnabled = patch.QueuePenaltyEnabled
 		}
 	})
 

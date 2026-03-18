@@ -13,7 +13,10 @@ type AdminConfig struct {
 	FirstTokenDelayMs    int     `json:"first_token_delay_ms"`
 	FixedDelayMs         int     `json:"fixed_delay_ms"`
 	JitterMs             int     `json:"jitter_ms"`
-	SlowdownQPSThreshold float64 `json:"slowdown_qps_threshold"`
-	SlowdownFactor       float64 `json:"slowdown_factor"`
 	TPSVariance          float64 `json:"tps_variance"`
+	LoadCurveCenter      float64 `json:"load_curve_center"`
+	LoadCurveSteepness   float64 `json:"load_curve_steepness"`
+	MinEfficiency        float64 `json:"min_efficiency"`
+	QueuePenaltyEnabled  bool    `json:"queue_penalty_enabled"`
+	QueuePenaltyFactor   float64 `json:"queue_penalty_factor"`
 }

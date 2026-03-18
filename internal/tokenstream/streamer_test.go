@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"fakellm/internal/admission"
 	"fakellm/internal/config"
+	"fakellm/internal/queue"
 )
 
 func newManager(tps float64, fixedMs, jitterMs int) *config.Manager {
@@ -16,14 +18,21 @@ func newManager(tps float64, fixedMs, jitterMs int) *config.Manager {
 	cfg.TokensPerSecond = tps
 	cfg.FixedDelayMs = fixedMs
 	cfg.JitterMs = jitterMs
-	cfg.SlowdownQPSThreshold = 0 // disable slowdown for unit tests
+	cfg.MinEfficiency = 1.0 // disable load curve for unit tests (always 100% efficiency)
 	return config.NewManager(cfg)
+}
+
+func newStreamer(mgr *config.Manager) *Streamer {
+	// Use a large capacity semaphore and queue for tests to avoid blocking
+	sema := admission.New(1000)
+	q := queue.New(1000, 1)
+	return New(mgr, sema, q)
 }
 
 // TestStream_EmitsDONE verifies the stream ends with the SSE terminator.
 func TestStream_EmitsDONE(t *testing.T) {
 	mgr := newManager(10000, 0, 0) // very fast
-	s := New(mgr)
+	s := newStreamer(mgr)
 
 	var buf bytes.Buffer
 	ctx := context.Background()
@@ -39,7 +48,7 @@ func TestStream_EmitsDONE(t *testing.T) {
 // TestStream_ContainsLoremWords verifies some known lorem words appear.
 func TestStream_ContainsLoremWords(t *testing.T) {
 	mgr := newManager(10000, 0, 0)
-	s := New(mgr)
+	s := newStreamer(mgr)
 
 	var buf bytes.Buffer
 	if err := s.Stream(context.Background(), &buf, "mock"); err != nil {
@@ -57,7 +66,7 @@ func TestStream_ContainsLoremWords(t *testing.T) {
 func TestStream_CancelMidway(t *testing.T) {
 	// Slow stream so cancellation hits before completion.
 	mgr := newManager(5, 0, 0) // 5 tokens/s → 200ms per token
-	s := New(mgr)
+	s := newStreamer(mgr)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -84,7 +93,7 @@ func TestStream_CancelMidway(t *testing.T) {
 // ChatResponse containing all lorem words.
 func TestGenerate_ReturnsFullContent(t *testing.T) {
 	mgr := newManager(10000, 0, 0) // very fast
-	s := New(mgr)
+	s := newStreamer(mgr)
 
 	resp, err := s.Generate(context.Background(), "mock")
 	if err != nil {
@@ -116,7 +125,7 @@ func TestGenerate_ReturnsFullContent(t *testing.T) {
 // TestGenerate_CancelMidway verifies that context cancellation interrupts Generate.
 func TestGenerate_CancelMidway(t *testing.T) {
 	mgr := newManager(5, 0, 0) // 5 tokens/s → 200ms per token
-	s := New(mgr)
+	s := newStreamer(mgr)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -137,7 +146,7 @@ func TestGenerate_CancelMidway(t *testing.T) {
 
 func TestGenerate_PropagatesCancelCause(t *testing.T) {
 	mgr := newManager(5, 0, 0)
-	s := New(mgr)
+	s := newStreamer(mgr)
 
 	ctx, cancel := context.WithCancelCause(context.Background())
 	want := errors.New("queue timeout")
@@ -167,11 +176,11 @@ func TestGenerate_MatchesStreamTiming(t *testing.T) {
 
 	streamTime := measure(func(ctx context.Context) {
 		var buf bytes.Buffer
-		_ = New(mgr).Stream(ctx, &buf, "mock")
+		_ = newStreamer(mgr).Stream(ctx, &buf, "mock")
 	})
 
 	generateTime := measure(func(ctx context.Context) {
-		_, _ = New(mgr).Generate(ctx, "mock")
+		_, _ = newStreamer(mgr).Generate(ctx, "mock")
 	})
 
 	// Both should be within 100ms of each other (same rate, same cancellation).
@@ -183,16 +192,21 @@ func TestGenerate_MatchesStreamTiming(t *testing.T) {
 		t.Errorf("timing mismatch too large: stream=%v generate=%v diff=%v", streamTime, generateTime, diff)
 	}
 }
-func TestSlowdown_ReducesRate(t *testing.T) {
+func TestLoadCurve_ReducesRate(t *testing.T) {
+	// Test the sigmoid load curve
 	cfg := config.Default()
-	cfg.TokensPerSecond = 1000   // fast base rate
-	cfg.SlowdownQPSThreshold = 1 // trigger after just 1 QPS
-	cfg.SlowdownFactor = 0.01    // slow down to 1% → ~10 tokens/s
+	cfg.TokensPerSecond = 1000 // fast base rate
+	cfg.LoadCurveCenter = 0.5  // center at 50% load
+	cfg.LoadCurveSteepness = 5.0
+	cfg.MinEfficiency = 0.5    // floor at 50%
 	cfg.FixedDelayMs = 0
 	cfg.JitterMs = 0
+	cfg.MaxConcurrent = 10     // small capacity
 	mgr := config.NewManager(cfg)
 
-	s := New(mgr)
+	sema := admission.New(10)
+	q := queue.New(100, 1)
+	s := New(mgr, sema, q)
 	s.RecordRequest() // bump QPS so slowdown triggers
 	// Rotate window by faking high count.
 	for range 5 {
