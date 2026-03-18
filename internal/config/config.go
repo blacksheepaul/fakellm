@@ -79,54 +79,58 @@ func (m *Manager) Patch(fn func(*Config)) *Config {
 	return &next
 }
 
-// LoadFromEnv loads configuration from environment variables with defaults.
-// It attempts to load .env file if present, then reads from environment.
-// Panics if any environment variable is set but has an invalid format.
+// LoadFromEnv loads configuration from .env file.
+// Panics if .env file does not exist or if any variable is missing or invalid.
 func LoadFromEnv() *Config {
-	// Try to load .env file (ignore error if not exists)
-	_ = godotenv.Load()
+	// Load .env file, panic if not exists
+	if err := godotenv.Load(); err != nil {
+		panic(fmt.Sprintf("config: .env file not found: %v", err))
+	}
 
 	return &Config{
-		MaxConcurrent:        mustGetIntEnv("MAX_CONCURRENT", 10),
-		MaxQueueDepth:        mustGetIntEnv("MAX_QUEUE_DEPTH", 100),
-		QueueTimeout:         mustGetDurationEnv("QUEUE_TIMEOUT", 30*time.Second),
-		TokensPerSecond:      mustGetFloatEnv("TOKENS_PER_SECOND", 20),
-		FixedDelayMs:         mustGetIntEnv("FIXED_DELAY_MS", 0),
-		JitterMs:             mustGetIntEnv("JITTER_MS", 0),
-		SlowdownQPSThreshold: mustGetFloatEnv("SLOWDOWN_QPS_THRESHOLD", 50),
-		SlowdownFactor:       mustGetFloatEnv("SLOWDOWN_FACTOR", 0.5),
+		MaxConcurrent:        mustGetIntEnv("MAX_CONCURRENT"),
+		MaxQueueDepth:        mustGetIntEnv("MAX_QUEUE_DEPTH"),
+		QueueTimeout:         mustGetDurationEnv("QUEUE_TIMEOUT"),
+		TokensPerSecond:      mustGetFloatEnv("TOKENS_PER_SECOND"),
+		FixedDelayMs:         mustGetIntEnv("FIXED_DELAY_MS"),
+		JitterMs:             mustGetIntEnv("JITTER_MS"),
+		SlowdownQPSThreshold: mustGetFloatEnv("SLOWDOWN_QPS_THRESHOLD"),
+		SlowdownFactor:       mustGetFloatEnv("SLOWDOWN_FACTOR"),
 	}
 }
 
-func mustGetIntEnv(key string, defaultValue int) int {
-	if value := os.Getenv(key); value != "" {
-		i, err := strconv.Atoi(value)
-		if err != nil {
-			panic(fmt.Sprintf("config: invalid value for %s: %q, expected integer", key, value))
-		}
-		return i
+func mustGetIntEnv(key string) int {
+	value := os.Getenv(key)
+	if value == "" {
+		panic(fmt.Sprintf("config: required environment variable %s is not set", key))
 	}
-	return defaultValue
+	i, err := strconv.Atoi(value)
+	if err != nil {
+		panic(fmt.Sprintf("config: invalid value for %s: %q, expected integer", key, value))
+	}
+	return i
 }
 
-func mustGetFloatEnv(key string, defaultValue float64) float64 {
-	if value := os.Getenv(key); value != "" {
-		f, err := strconv.ParseFloat(value, 64)
-		if err != nil {
-			panic(fmt.Sprintf("config: invalid value for %s: %q, expected number", key, value))
-		}
-		return f
+func mustGetFloatEnv(key string) float64 {
+	value := os.Getenv(key)
+	if value == "" {
+		panic(fmt.Sprintf("config: required environment variable %s is not set", key))
 	}
-	return defaultValue
+	f, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		panic(fmt.Sprintf("config: invalid value for %s: %q, expected number", key, value))
+	}
+	return f
 }
 
-func mustGetDurationEnv(key string, defaultValue time.Duration) time.Duration {
-	if value := os.Getenv(key); value != "" {
-		d, err := time.ParseDuration(value)
-		if err != nil {
-			panic(fmt.Sprintf("config: invalid value for %s: %q, expected duration (e.g., 30s, 1m)", key, value))
-		}
-		return d
+func mustGetDurationEnv(key string) time.Duration {
+	value := os.Getenv(key)
+	if value == "" {
+		panic(fmt.Sprintf("config: required environment variable %s is not set", key))
 	}
-	return defaultValue
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		panic(fmt.Sprintf("config: invalid value for %s: %q, expected duration (e.g., 30s, 1m)", key, value))
+	}
+	return d
 }
