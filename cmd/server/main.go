@@ -18,7 +18,7 @@ func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	flag.Parse()
 
-	cfg := config.NewManager(config.Default())
+	cfg := config.NewManager(config.LoadFromEnv())
 
 	// Build shared components from initial config.
 	c := cfg.Load()

@@ -1,8 +1,13 @@
 package config
 
 import (
+	"fmt"
+	"os"
+	"strconv"
 	"sync/atomic"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 // Config holds all runtime-tunable parameters.
@@ -72,4 +77,56 @@ func (m *Manager) Patch(fn func(*Config)) *Config {
 	fn(&next)
 	m.ptr.Store(&next)
 	return &next
+}
+
+// LoadFromEnv loads configuration from environment variables with defaults.
+// It attempts to load .env file if present, then reads from environment.
+// Panics if any environment variable is set but has an invalid format.
+func LoadFromEnv() *Config {
+	// Try to load .env file (ignore error if not exists)
+	_ = godotenv.Load()
+
+	return &Config{
+		MaxConcurrent:        mustGetIntEnv("MAX_CONCURRENT", 10),
+		MaxQueueDepth:        mustGetIntEnv("MAX_QUEUE_DEPTH", 100),
+		QueueTimeout:         mustGetDurationEnv("QUEUE_TIMEOUT", 30*time.Second),
+		TokensPerSecond:      mustGetFloatEnv("TOKENS_PER_SECOND", 20),
+		FixedDelayMs:         mustGetIntEnv("FIXED_DELAY_MS", 0),
+		JitterMs:             mustGetIntEnv("JITTER_MS", 0),
+		SlowdownQPSThreshold: mustGetFloatEnv("SLOWDOWN_QPS_THRESHOLD", 50),
+		SlowdownFactor:       mustGetFloatEnv("SLOWDOWN_FACTOR", 0.5),
+	}
+}
+
+func mustGetIntEnv(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		i, err := strconv.Atoi(value)
+		if err != nil {
+			panic(fmt.Sprintf("config: invalid value for %s: %q, expected integer", key, value))
+		}
+		return i
+	}
+	return defaultValue
+}
+
+func mustGetFloatEnv(key string, defaultValue float64) float64 {
+	if value := os.Getenv(key); value != "" {
+		f, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			panic(fmt.Sprintf("config: invalid value for %s: %q, expected number", key, value))
+		}
+		return f
+	}
+	return defaultValue
+}
+
+func mustGetDurationEnv(key string, defaultValue time.Duration) time.Duration {
+	if value := os.Getenv(key); value != "" {
+		d, err := time.ParseDuration(value)
+		if err != nil {
+			panic(fmt.Sprintf("config: invalid value for %s: %q, expected duration (e.g., 30s, 1m)", key, value))
+		}
+		return d
+	}
+	return defaultValue
 }
