@@ -70,9 +70,10 @@ type Config struct {
     QueueTimeout  time.Duration // 排队最长等待
 
     // TokenStream
-    TokensPerSecond float64     // 基础 token 发送速率
-    FixedDelayMs    int         // 每 token 固定附加延迟(ms)
-    JitterMs        int         // 每 token ±随机抖动(ms)
+    TokensPerSecond    float64  // 基础 token 发送速率
+    FirstTokenDelayMs  int      // 首字延迟：生成第一个 token 前的延迟(ms)
+    FixedDelayMs       int      // 每 token 固定附加延迟(ms)，每个 token 都会叠加
+    JitterMs           int      // 每 token ±随机抖动(ms)
 
     // Slowdown（越催越慢）
     SlowdownQPSThreshold float64 // 触发阈值（全局 QPS）
@@ -200,7 +201,8 @@ curl -X PATCH http://localhost:8080/admin/config \
 
 | 行为               | 控制参数                                      |
 |--------------------|-----------------------------------------------|
-| 固定延迟           | `FixedDelayMs`                                |
+| 首字延迟 (TTFT)    | `FirstTokenDelayMs`                           |
+| 每 token 固定延迟  | `FixedDelayMs`                                |
 | 随机抖动           | `JitterMs`                                    |
 | 并发容量限制       | `MaxConcurrent`                               |
 | 排队上限           | `MaxQueueDepth`                               |
