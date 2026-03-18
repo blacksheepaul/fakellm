@@ -100,6 +100,15 @@ func (s *Streamer) generate(ctx context.Context, onToken func(string) error) err
 			tps *= factor
 		}
 	}
+
+	// Apply per-request TPS variance to simulate real GPU cluster behavior.
+	// Different requests may experience different batch sizes and scheduling delays.
+	if cfg.TPSVariance > 0 {
+		// rand.Float64() returns [0.0, 1.0), map to [-variance, +variance)
+		variance := (rand.Float64()*2 - 1) * cfg.TPSVariance
+		tps *= (1 + variance)
+	}
+
 	baseInterval := time.Duration(float64(time.Second) / tps)
 
 	// Apply first token delay before emitting the first token

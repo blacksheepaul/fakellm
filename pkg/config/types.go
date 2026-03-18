@@ -15,4 +15,5 @@ type AdminConfig struct {
 	JitterMs             int     `json:"jitter_ms"`
 	SlowdownQPSThreshold float64 `json:"slowdown_qps_threshold"`
 	SlowdownFactor       float64 `json:"slowdown_factor"`
+	TPSVariance          float64 `json:"tps_variance"`
 }

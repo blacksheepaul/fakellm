@@ -30,6 +30,12 @@ type Config struct {
 	// effective rate = TokensPerSecond * SlowdownFactor (< 1.0 means slower).
 	SlowdownQPSThreshold float64
 	SlowdownFactor       float64
+
+	// TPSVariance adds per-request variance to the base TokensPerSecond.
+	// e.g., 0.15 means each request gets TPS in [85%, 115%] of base.
+	// This simulates real GPU clusters where different requests experience
+	// different batch sizes and scheduling delays.
+	TPSVariance float64
 }
 
 // Default returns a sensible out-of-the-box configuration.
@@ -44,6 +50,7 @@ func Default() *Config {
 		JitterMs:             0,
 		SlowdownQPSThreshold: 50,
 		SlowdownFactor:       0.5,
+		TPSVariance:          0.0,
 	}
 }
 
@@ -99,6 +106,7 @@ func LoadFromEnv() *Config {
 		JitterMs:             mustGetIntEnv("JITTER_MS"),
 		SlowdownQPSThreshold: mustGetFloatEnv("SLOWDOWN_QPS_THRESHOLD"),
 		SlowdownFactor:       mustGetFloatEnv("SLOWDOWN_FACTOR"),
+		TPSVariance:          mustGetFloatEnv("TPS_VARIANCE"),
 	}
 }
 

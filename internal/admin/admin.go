@@ -49,6 +49,7 @@ func toJSON(c *config.Config) AdminConfig {
 		JitterMs:             c.JitterMs,
 		SlowdownQPSThreshold: c.SlowdownQPSThreshold,
 		SlowdownFactor:       c.SlowdownFactor,
+		TPSVariance:          c.TPSVariance,
 	}
 }
 
@@ -97,6 +98,9 @@ func (a *Admin) PatchConfig(ctx context.Context, c *app.RequestContext) {
 		}
 		if patch.SlowdownFactor != 0 {
 			cfg.SlowdownFactor = patch.SlowdownFactor
+		}
+		if patch.TPSVariance != 0 {
+			cfg.TPSVariance = patch.TPSVariance
 		}
 	})
 
