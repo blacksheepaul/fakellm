@@ -35,11 +35,14 @@ curl -X PATCH localhost:8080/admin/config -d '{"max_concurrent":1}'
 # 越催越慢：QPS>50 时速率降为 50%
 curl -X PATCH localhost:8080/admin/config -d '{"slowdown_qps_threshold":50,"slowdown_factor":0.5}'
 
-# 加抖动和固定延迟
+# 加抖动和固定延迟（fixed_delay_ms 是每 token 的延迟）
 curl -X PATCH localhost:8080/admin/config -d '{"jitter_ms":200,"fixed_delay_ms":100}'
+
+# 设置首字延迟（TTFT - Time To First Token）
+curl -X PATCH localhost:8080/admin/config -d '{"first_token_delay_ms":500}'
 ```
 
-可调参数：并发上限、队列深度、token 速率、延迟抖动、越催越慢阈值。
+可调参数：并发上限、队列深度、token 速率、首字延迟、每 token 固定延迟、延迟抖动、越催越慢阈值。
 
 ## 端点
 

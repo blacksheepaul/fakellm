@@ -21,9 +21,10 @@ type Config struct {
 	QueueTimeout  time.Duration // max time a request waits in queue; 0 = no timeout
 
 	// TokenStream
-	TokensPerSecond float64 // base token emit rate
-	FixedDelayMs    int     // fixed extra delay per token (ms)
-	JitterMs        int     // random ±jitter per token (ms)
+	TokensPerSecond    float64 // base token emit rate
+	FirstTokenDelayMs  int     // delay before emitting first token (ms)
+	FixedDelayMs       int     // fixed extra delay per token (ms), applied to every token
+	JitterMs           int     // random ±jitter per token (ms)
 
 	// Slowdown: when global QPS exceeds SlowdownQPSThreshold,
 	// effective rate = TokensPerSecond * SlowdownFactor (< 1.0 means slower).
@@ -38,6 +39,7 @@ func Default() *Config {
 		MaxQueueDepth:        100,
 		QueueTimeout:         30 * time.Second,
 		TokensPerSecond:      20,
+		FirstTokenDelayMs:    0,
 		FixedDelayMs:         0,
 		JitterMs:             0,
 		SlowdownQPSThreshold: 50,
@@ -92,6 +94,7 @@ func LoadFromEnv() *Config {
 		MaxQueueDepth:        mustGetIntEnv("MAX_QUEUE_DEPTH"),
 		QueueTimeout:         mustGetDurationEnv("QUEUE_TIMEOUT"),
 		TokensPerSecond:      mustGetFloatEnv("TOKENS_PER_SECOND"),
+		FirstTokenDelayMs:    mustGetIntEnv("FIRST_TOKEN_DELAY_MS"),
 		FixedDelayMs:         mustGetIntEnv("FIXED_DELAY_MS"),
 		JitterMs:             mustGetIntEnv("JITTER_MS"),
 		SlowdownQPSThreshold: mustGetFloatEnv("SLOWDOWN_QPS_THRESHOLD"),

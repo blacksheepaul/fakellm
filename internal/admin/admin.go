@@ -44,6 +44,7 @@ func toJSON(c *config.Config) AdminConfig {
 		MaxQueueDepth:        c.MaxQueueDepth,
 		QueueTimeoutSec:      c.QueueTimeout.Seconds(),
 		TokensPerSecond:      c.TokensPerSecond,
+		FirstTokenDelayMs:    c.FirstTokenDelayMs,
 		FixedDelayMs:         c.FixedDelayMs,
 		JitterMs:             c.JitterMs,
 		SlowdownQPSThreshold: c.SlowdownQPSThreshold,
@@ -81,6 +82,9 @@ func (a *Admin) PatchConfig(ctx context.Context, c *app.RequestContext) {
 		}
 		if patch.TokensPerSecond != 0 {
 			cfg.TokensPerSecond = patch.TokensPerSecond
+		}
+		if patch.FirstTokenDelayMs != 0 {
+			cfg.FirstTokenDelayMs = patch.FirstTokenDelayMs
 		}
 		if patch.FixedDelayMs != 0 {
 			cfg.FixedDelayMs = patch.FixedDelayMs

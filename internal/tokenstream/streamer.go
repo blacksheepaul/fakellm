@@ -102,6 +102,17 @@ func (s *Streamer) generate(ctx context.Context, onToken func(string) error) err
 	}
 	baseInterval := time.Duration(float64(time.Second) / tps)
 
+	// Apply first token delay before emitting the first token
+	if cfg.FirstTokenDelayMs > 0 {
+		timer := time.NewTimer(time.Duration(cfg.FirstTokenDelayMs) * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctxErr()
+		case <-timer.C:
+		}
+	}
+
 	for i, word := range loremWords {
 		select {
 		case <-ctx.Done():

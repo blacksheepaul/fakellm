@@ -10,6 +10,7 @@ type AdminConfig struct {
 	MaxQueueDepth        int     `json:"max_queue_depth"`
 	QueueTimeoutSec      float64 `json:"queue_timeout_sec"`
 	TokensPerSecond      float64 `json:"tokens_per_second"`
+	FirstTokenDelayMs    int     `json:"first_token_delay_ms"`
 	FixedDelayMs         int     `json:"fixed_delay_ms"`
 	JitterMs             int     `json:"jitter_ms"`
 	SlowdownQPSThreshold float64 `json:"slowdown_qps_threshold"`
