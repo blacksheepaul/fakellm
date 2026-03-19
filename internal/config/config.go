@@ -21,10 +21,10 @@ type Config struct {
 	QueueTimeout  time.Duration // max time a request waits in queue; 0 = no timeout
 
 	// TokenStream
-	TokensPerSecond    float64 // base token emit rate
-	FirstTokenDelayMs  int     // delay before emitting first token (ms)
-	FixedDelayMs       int     // fixed extra delay per token (ms), applied to every token
-	JitterMs           int     // random ±jitter per token (ms)
+	TokensPerSecond   float64 // base token emit rate
+	FirstTokenDelayMs int     // delay before emitting first token (ms)
+	FixedDelayMs      int     // fixed extra delay per token (ms), applied to every token
+	JitterMs          int     // random ±jitter per token (ms)
 
 	// TPSVariance adds per-request variance to the base TokensPerSecond.
 	// e.g., 0.15 means each request gets TPS in [85%, 115%] of base.
@@ -51,24 +51,34 @@ type Config struct {
 	// QueuePenaltyFactor is the TTFT increase per 10 queued requests.
 	// e.g., 0.5 means each 10 queued requests adds 50% to FirstTokenDelayMs.
 	QueuePenaltyFactor float64
+
+	// TextSource determines the text corpus to use.
+	// "lorem" (default) uses the built-in Lorem Ipsum corpus.
+	// "file" uses random text from the file specified by FilePath.
+	TextSource string
+
+	// FilePath specifies the path to the text file when TextSource is "file".
+	FilePath string
 }
 
 // Default returns a sensible out-of-the-box configuration.
 func Default() *Config {
 	return &Config{
-		MaxConcurrent:        10,
-		MaxQueueDepth:        100,
-		QueueTimeout:         30 * time.Second,
-		TokensPerSecond:      20,
-		FirstTokenDelayMs:    0,
-		FixedDelayMs:         0,
-		JitterMs:             0,
-		TPSVariance:          0.0,
-		LoadCurveCenter:      0.6,
-		LoadCurveSteepness:   5.0,
-		MinEfficiency:        0.6,
-		QueuePenaltyEnabled:  false,
-		QueuePenaltyFactor:   0.5,
+		MaxConcurrent:       10,
+		MaxQueueDepth:       100,
+		QueueTimeout:        30 * time.Second,
+		TokensPerSecond:     20,
+		FirstTokenDelayMs:   0,
+		FixedDelayMs:        0,
+		JitterMs:            0,
+		TPSVariance:         0.0,
+		LoadCurveCenter:     0.6,
+		LoadCurveSteepness:  5.0,
+		MinEfficiency:       0.6,
+		QueuePenaltyEnabled: false,
+		QueuePenaltyFactor:  0.5,
+		TextSource:          "lorem",
+		FilePath:            "asset/lorem/0",
 	}
 }
 
@@ -115,19 +125,21 @@ func LoadFromEnv() *Config {
 	}
 
 	return &Config{
-		MaxConcurrent:        mustGetIntEnv("MAX_CONCURRENT"),
-		MaxQueueDepth:        mustGetIntEnv("MAX_QUEUE_DEPTH"),
-		QueueTimeout:         mustGetDurationEnv("QUEUE_TIMEOUT"),
-		TokensPerSecond:      mustGetFloatEnv("TOKENS_PER_SECOND"),
-		FirstTokenDelayMs:    mustGetIntEnv("FIRST_TOKEN_DELAY_MS"),
-		FixedDelayMs:         mustGetIntEnv("FIXED_DELAY_MS"),
-		JitterMs:             mustGetIntEnv("JITTER_MS"),
-		TPSVariance:          mustGetFloatEnv("TPS_VARIANCE"),
-		LoadCurveCenter:      mustGetFloatEnv("LOAD_CURVE_CENTER"),
-		LoadCurveSteepness:   mustGetFloatEnv("LOAD_CURVE_STEEPNESS"),
-		MinEfficiency:        mustGetFloatEnv("MIN_EFFICIENCY"),
-		QueuePenaltyEnabled:  mustGetBoolEnv("QUEUE_PENALTY_ENABLED"),
-		QueuePenaltyFactor:   mustGetFloatEnv("QUEUE_PENALTY_FACTOR"),
+		MaxConcurrent:       mustGetIntEnv("MAX_CONCURRENT"),
+		MaxQueueDepth:       mustGetIntEnv("MAX_QUEUE_DEPTH"),
+		QueueTimeout:        mustGetDurationEnv("QUEUE_TIMEOUT"),
+		TokensPerSecond:     mustGetFloatEnv("TOKENS_PER_SECOND"),
+		FirstTokenDelayMs:   mustGetIntEnv("FIRST_TOKEN_DELAY_MS"),
+		FixedDelayMs:        mustGetIntEnv("FIXED_DELAY_MS"),
+		JitterMs:            mustGetIntEnv("JITTER_MS"),
+		TPSVariance:         mustGetFloatEnv("TPS_VARIANCE"),
+		LoadCurveCenter:     mustGetFloatEnv("LOAD_CURVE_CENTER"),
+		LoadCurveSteepness:  mustGetFloatEnv("LOAD_CURVE_STEEPNESS"),
+		MinEfficiency:       mustGetFloatEnv("MIN_EFFICIENCY"),
+		QueuePenaltyEnabled: mustGetBoolEnv("QUEUE_PENALTY_ENABLED"),
+		QueuePenaltyFactor:  mustGetFloatEnv("QUEUE_PENALTY_FACTOR"),
+		TextSource:          getEnvOrDefault("TEXT_SOURCE", "lorem"),
+		FilePath:            getEnvOrDefault("FILE_PATH", "asset/lorem/0"),
 	}
 }
 
@@ -177,4 +189,12 @@ func mustGetBoolEnv(key string) bool {
 		panic(fmt.Sprintf("config: invalid value for %s: %q, expected boolean (true/false/1/0)", key, value))
 	}
 	return b
+}
+
+func getEnvOrDefault(key, defaultValue string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	return value
 }

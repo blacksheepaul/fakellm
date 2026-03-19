@@ -18,14 +18,15 @@ import (
 	"io"
 	"math"
 	"math/rand/v2"
+	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"fakellm/internal/admission"
 	"fakellm/internal/config"
 	"fakellm/internal/queue"
-	"fakellm/pkg/openai"
 
 	"encoding/json"
 )
@@ -42,6 +43,90 @@ ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sun
 explicabo Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit
 sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt neque
 porro quisquam est qui dolorem ipsum quia dolor sit amet consectetur adipisci velit`)
+
+// fileWordsCache holds cached words loaded from file.
+var (
+	fileWordsCache     []string
+	cachedFilePath     string
+	fileWordsCacheLock sync.RWMutex
+)
+
+// loadFileWords loads and returns words from the specified file.
+// It caches the result to avoid re-reading the file.
+func loadFileWords(filePath string) []string {
+	fileWordsCacheLock.RLock()
+	if cachedFilePath == filePath && len(fileWordsCache) > 0 {
+		defer fileWordsCacheLock.RUnlock()
+		return fileWordsCache
+	}
+	fileWordsCacheLock.RUnlock()
+
+	fileWordsCacheLock.Lock()
+	defer fileWordsCacheLock.Unlock()
+
+	// Double-check after acquiring write lock
+	if cachedFilePath == filePath && len(fileWordsCache) > 0 {
+		return fileWordsCache
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		// Fallback to lorem if file cannot be read
+		return loremWords
+	}
+
+	if len(data) == 0 {
+		return loremWords
+	}
+
+	// Pick a random starting position
+	segmentSize := 2000
+	if len(data) < segmentSize {
+		segmentSize = len(data)
+	}
+
+	maxStart := len(data) - segmentSize
+	if maxStart > 0 {
+		start := rand.IntN(maxStart)
+		data = data[start : start+segmentSize]
+	}
+
+	// Clean up the text
+	text := string(data)
+	text = strings.ReplaceAll(text, "\n", " ")
+	text = strings.ReplaceAll(text, "\r", " ")
+
+	// Remove HTML-like tags
+	for {
+		start := strings.Index(text, "<")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(text[start:], ">")
+		if end == -1 {
+			break
+		}
+		text = text[:start] + " " + text[start+end+1:]
+	}
+
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return loremWords
+	}
+
+	fileWordsCache = words
+	cachedFilePath = filePath
+	return fileWordsCache
+}
+
+// getWords returns the appropriate word list based on config.
+func (s *Streamer) getWords() []string {
+	cfg := s.cfg.Load()
+	if cfg.TextSource == "file" && cfg.FilePath != "" {
+		return loadFileWords(cfg.FilePath)
+	}
+	return loremWords
+}
 
 // Streamer manages QPS tracking and token emission.
 type Streamer struct {
