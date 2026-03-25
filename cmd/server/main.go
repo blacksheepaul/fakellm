@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"log"
 
 	"fakellm/internal/admin"
@@ -15,9 +14,6 @@ import (
 )
 
 func main() {
-	addr := flag.String("addr", ":8080", "listen address")
-	flag.Parse()
-
 	cfg := config.NewManager(config.LoadFromEnv())
 
 	// Build shared components from initial config.
@@ -30,7 +26,7 @@ func main() {
 	adm := admin.New(cfg, sema, q, streamer)
 
 	srv := server.New(
-		server.WithHostPorts(*addr),
+		server.WithHostPorts(c.ServerAddr),
 		server.WithStreamBody(true),
 	)
 
@@ -39,6 +35,6 @@ func main() {
 	srv.PATCH("/admin/config", adm.PatchConfig)
 	srv.GET("/admin/stats", adm.GetStats)
 
-	log.Printf("fakellm listening on %s", *addr)
+	log.Printf("fakellm listening on %s", c.ServerAddr)
 	srv.Spin()
 }

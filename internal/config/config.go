@@ -13,6 +13,9 @@ import (
 // Config holds all runtime-tunable parameters.
 // It is treated as immutable once stored; mutations go through Store.
 type Config struct {
+	// Server
+	ServerAddr string // HTTP listen address, e.g. ":8080"
+
 	// Admission
 	MaxConcurrent int // max in-flight requests; 0 = unlimited
 
@@ -64,6 +67,7 @@ type Config struct {
 // Default returns a sensible out-of-the-box configuration.
 func Default() *Config {
 	return &Config{
+		ServerAddr:          ":8080",
 		MaxConcurrent:       10,
 		MaxQueueDepth:       100,
 		QueueTimeout:        30 * time.Second,
@@ -125,6 +129,7 @@ func LoadFromEnv() *Config {
 	}
 
 	return &Config{
+		ServerAddr:          mustGetStringEnv("SERVER_ADDR"),
 		MaxConcurrent:       mustGetIntEnv("MAX_CONCURRENT"),
 		MaxQueueDepth:       mustGetIntEnv("MAX_QUEUE_DEPTH"),
 		QueueTimeout:        mustGetDurationEnv("QUEUE_TIMEOUT"),
@@ -141,6 +146,14 @@ func LoadFromEnv() *Config {
 		TextSource:          getEnvOrDefault("TEXT_SOURCE", "lorem"),
 		FilePath:            getEnvOrDefault("FILE_PATH", "asset/lorem/0"),
 	}
+}
+
+func mustGetStringEnv(key string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		panic(fmt.Sprintf("config: required environment variable %s is not set", key))
+	}
+	return value
 }
 
 func mustGetIntEnv(key string) int {
