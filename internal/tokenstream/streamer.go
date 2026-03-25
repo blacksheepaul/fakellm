@@ -27,6 +27,7 @@ import (
 	"fakellm/internal/admission"
 	"fakellm/internal/config"
 	"fakellm/internal/queue"
+	"fakellm/pkg/openai"
 
 	"encoding/json"
 )
